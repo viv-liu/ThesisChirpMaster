@@ -1,7 +1,6 @@
 package com.somitsolutions.android.spectrumanalyzermaster;
 
 import java.util.ArrayList;
-import java.util.LinkedList;
 import java.util.List;
 
 import android.app.Activity;
@@ -22,7 +21,6 @@ import android.os.Bundle;
 import android.os.CountDownTimer;
 import android.util.Log;
 import android.view.Display;
-import android.view.Gravity;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.ViewGroup.LayoutParams;
@@ -46,7 +44,7 @@ public class SoundRecordAndAnalysisActivity extends Activity implements OnClickL
     
     private final int NUM_SAMPLES = sampleRate;//duration * sampleRate;
     private final double sample[] = new double[NUM_SAMPLES];
-    private final int freqOfTone = 1000; // hz A4
+    private final int freqOfTone = 500; // hz A4
 
     private AudioTrack mAudioTrack;
     private final byte generatedSnd[] = new byte[2 * NUM_SAMPLES];
@@ -108,7 +106,7 @@ public class SoundRecordAndAnalysisActivity extends Activity implements OnClickL
     	width = display.getWidth();
     	height = display.getHeight();
 
-		blockSize = 256;
+		blockSize = 512;
 		//getValidSampleRates();
     }
     
@@ -163,11 +161,16 @@ public class SoundRecordAndAnalysisActivity extends Activity implements OnClickL
     	left_Of_DisplaySpectrum = bitmap.getLeft();
     }
     private class RecordAudio extends AsyncTask<Void, Boolean, Void> {
-    	private LinkedList<Double> selfFiveBuffer = new LinkedList<Double>();
+    	/*private LinkedList<Double> selfFiveBuffer = new LinkedList<Double>();
     	private LinkedList<Double> receiveFiveBuffer = new LinkedList<Double>();
     	double selfFiveAverage;
-    	double receiveFiveAverage;
-   
+    	double receiveFiveAverage;*/
+    	
+    	private final String SELF_DETECTED_STRING = "DETECTED_SELF";
+    	private final String OTHER_DETECTED_STRING = "DETECTED_OTHER";
+    	
+    	boolean heardSelf = false;
+    	boolean heardOther = false;
         @Override
         protected Void doInBackground(Void... params) {
       
@@ -177,6 +180,7 @@ public class SoundRecordAndAnalysisActivity extends Activity implements OnClickL
         	playSound();
         	List<Integer> zeroCrossingIndices = new ArrayList<Integer>();
             int bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfiguration, audioEncoding);
+            Log.d(SELF_DETECTED_STRING, "min buffer size = " + String.valueOf(AudioRecord.getMinBufferSize(sampleRate, channelConfiguration, audioEncoding)));
             audioRecord = new AudioRecord(MediaRecorder.AudioSource.DEFAULT, sampleRate, channelConfiguration, audioEncoding, bufferSize);
             int bufferReadResult;
             short[] buffer = new short[blockSize];
@@ -211,15 +215,17 @@ public class SoundRecordAndAnalysisActivity extends Activity implements OnClickL
 	                toTransform[i] = (double) buffer[i] / 32768.0; // signed 16 bit
 	            }
 	            
-	            if(detectTone(sampleRate, freqOfTone, zeroCrossingIndices)) {
-	            	Log.e(TAG, "Detected self tone " + String.valueOf(freqOfTone));
+	            if(!heardSelf && detectTone(sampleRate, freqOfTone, zeroCrossingIndices)) {
+	            	Log.e(SELF_DETECTED_STRING, "Detected self tone " + String.valueOf(freqOfTone));
 	            	selfSpeakerDelay = stopTiming();
-            		publishProgress(false);
+	            	heardSelf = true;
+	            	publishProgress(false);
             	}
-            	if(detectTone(sampleRate, freqOfTone * 2, zeroCrossingIndices)) {
-            		Log.e(TAG, "Detected receive tone = " + String.valueOf(freqOfTone * 2));
+	            else if(!heardOther && detectTone(sampleRate, freqOfTone * 2, zeroCrossingIndices)) {
+            		Log.e(OTHER_DETECTED_STRING, "Detected receive tone = " + String.valueOf(freqOfTone * 2));
             		rawTOF = stopTiming();
 	        		Log.d(TAG, "rawTOF = " + String.valueOf(rawTOF/1000000.0) + "ms");
+	        		heardOther = true;
 	        		publishProgress(true);
 	        		
             	}
@@ -240,9 +246,12 @@ public class SoundRecordAndAnalysisActivity extends Activity implements OnClickL
             
             return null;
         }
-        protected void onProgressUpdate(Boolean receiveComplete) {
-        	if(!receiveComplete) {
+        
+        @Override
+        protected void onProgressUpdate(Boolean... receiveComplete) {
+        	if(!receiveComplete[0]) {
     			selfStatusText.setText("selfSpeakerDelay = " + String.valueOf(selfSpeakerDelay/1000000.0) + "ms");
+    			receiveStatusText.setText("waiting...");
         	} else {
         		receiveStatusText.setText("rawTOF - selfSpeakerDelay = " + String.valueOf((rawTOF - selfSpeakerDelay)/1000000.0) + "ms");
         	}
@@ -334,6 +343,7 @@ public class SoundRecordAndAnalysisActivity extends Activity implements OnClickL
          */
         private boolean detectTone(int sampleRate, int pitch, List<Integer> indices) {
         	
+        	final int CONSEC_PATTERN_THRESHOLD = indices.size() / 2;
         	if(indices.size() <= 0) {
         		return false;
         	}
@@ -343,18 +353,26 @@ public class SoundRecordAndAnalysisActivity extends Activity implements OnClickL
         	int numTsInT = (int) (T/Ts);
         	
         	int expectedSpacing = numTsInT / 2; // index spacing, 2 zero crossings in a single sinusoid
+        	Log.d(TAG, "Expected spacing for " + String.valueOf(pitch) + " = " + String.valueOf(expectedSpacing));
+        	int diff = 0;
+        	int consecCount = 0;
         	
-        	int a = indices.get(0);
-        	int b;
-        	for(int i = 1; i < indices.size()/2; i++) {
-        		b = indices.get(i);
-        		if(b - a >= expectedSpacing - 2 && b - a <= expectedSpacing + 2) {
-        			a = b;
+        	for(int i = 1; i < indices.size(); i++) {
+        		diff = indices.get(i) - indices.get(i-1);
+        		if((diff >= (expectedSpacing - 1)) && (diff <= (expectedSpacing + 1))) {
+        			consecCount++;
+        			Log.d("Spacing", "Spacing ok, index " + String.valueOf(i) + " = " + String.valueOf(indices.get(i)));
         		} else {
+        			Log.e("Spacing", "Failed, index " + String.valueOf(i) + " = " + String.valueOf(indices.get(i)));
         			return false;
         		}
+        		
+        		if(consecCount >= CONSEC_PATTERN_THRESHOLD) {
+        			Log.d("Spacing", "Woohoo conseq count = " + String.valueOf(consecCount));
+        			return true;
+        		}
         	}
-        	return true;
+        	return false;
         }
                 
        }

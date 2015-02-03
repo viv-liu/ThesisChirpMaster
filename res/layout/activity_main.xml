@@ -20,7 +20,7 @@
         android:layout_height="wrap_content"
         android:layout_centerHorizontal="true"
         android:layout_centerVertical="true"
-        android:text="Play 440Hz" />
+        android:text="Play" />
 
     <Button
         android:id="@+id/button2"
@@ -54,7 +54,7 @@
         android:layout_height="wrap_content"
         android:layout_alignRight="@+id/textView2"
         android:layout_below="@+id/textView2"
-        android:text="Self speaker delay" />
+        android:text="Self tone index" />
 
     <TextView
         android:id="@+id/textView5"
@@ -62,6 +62,15 @@
         android:layout_height="wrap_content"
         android:layout_alignLeft="@+id/textView4"
         android:layout_below="@+id/textView4"
-        android:text="Response time" />
+        android:text="Other tone index" />
+
+    <TextView
+        android:id="@+id/textView6"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignLeft="@+id/textView5"
+        android:layout_below="@+id/textView5"
+        android:text="Index difference"
+        android:textAppearance="?android:attr/textAppearanceMedium" />
 
 </RelativeLayout>

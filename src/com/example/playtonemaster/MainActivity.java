@@ -1,4 +1,4 @@
-          package com.example.playtonemaster;
+package com.example.playtonemaster;
 
 import java.io.File;
 import java.io.FileWriter;
@@ -36,25 +36,20 @@ public class MainActivity extends Activity {
     int audioEncoding = AudioFormat.ENCODING_PCM_16BIT;
     AudioRecord audioRecord;
     RecordAudio recordTask;
-    int blockSize = 512;
+    int blockSize = 32;
     boolean started = false;
     
     // Self tone
-    private final int freqOfTone = 440; // hz A4
-    private final int NUM_SAMPLES = sampleRate/6;//duration * sampleRate;
+    private final int SELF_TONE_FREQUENCY = 500; // hz A4
+    private final int OTHER_TONE_FREQUENCY = SELF_TONE_FREQUENCY * 2;
+    private final int NUM_SAMPLES = sampleRate/4;//duration * sampleRate;
     private final double sample[] = new double[NUM_SAMPLES];
     private AudioTrack mAudioTrack;
     private final byte generatedSnd[] = new byte[2 * NUM_SAMPLES];
     
-    private long mSendTime = 0;
-    private long mReceiveTime = 0;
-    private final int num_records = 10;
-    private List<Long> selfTimesRecord;
-    private List<Long> totalTimesRecord;
+    private final int num_records = 3;
+    private List<Short> grandBuffer;
     private int beepNum = 0;
-    
-    private long selfSpeakerDelay = -1;
-    private long rawTOF = -1;
     
     private PausableCountdownTimer timer;
     private final int TIME_BETWEEN_CHIRPS_MS = 2000;
@@ -66,9 +61,9 @@ public class MainActivity extends Activity {
     private TextView mStatusText;
     private TextView mBeepNumText;
     private TextView mTimeText;
-    private TextView mSelfDelayText;
-    private TextView mTotalDelayText;
-    
+    private TextView mSelfToneIndexText;
+    private TextView mOtherToneIndexText;
+    private TextView mIndexDiffText;
     
     // File operations
     FileWriter writer;
@@ -80,18 +75,17 @@ public class MainActivity extends Activity {
         setContentView(R.layout.activity_main);
         genTone();
         
-        selfTimesRecord = new ArrayList<Long>();
-        totalTimesRecord = new ArrayList<Long>();
-        
+        grandBuffer = new ArrayList<Short>();
         // Initialize timer
-        timer = new PausableCountdownTimer(mPauseTimeLeft, TIME_BETWEEN_CHIRPS_MS, mTimeText, mBeepNumText);
+        timer = new PausableCountdownTimer(mPauseTimeLeft, TIME_BETWEEN_CHIRPS_MS, mTimeText);
         
         // Initialize views
         mStatusText = (TextView) findViewById(R.id.textView1);
         mBeepNumText = (TextView) findViewById(R.id.textView2);
         mTimeText = (TextView) findViewById(R.id.textView3);
-        mSelfDelayText = (TextView) findViewById(R.id.textView4);
-        mTotalDelayText = (TextView) findViewById(R.id.textView5);
+        mSelfToneIndexText = (TextView) findViewById(R.id.textView4);
+        mOtherToneIndexText = (TextView) findViewById(R.id.textView5);
+        mIndexDiffText = (TextView) findViewById(R.id.textView6);
         
         mTimeText.setText(String.valueOf(mPauseTimeLeft/1000.0) + " s");
         
@@ -100,21 +94,17 @@ public class MainActivity extends Activity {
 			
 			@Override
 			public void onClick(View v) {
-				if(mResetButton.getText().equals("Save records")) {
-					// Save records
-					createTimesRecordFile();
-					mResetButton.setText("Reset");
-				}
+				
 				mStatusText.setText("Initial state. Press play tone.");
 				
-				selfTimesRecord.clear();
-				totalTimesRecord.clear();
+				grandBuffer.clear();
 				
 				// Stop play tone, cancel timing, kill recordTask
 				if(mAudioTrack != null) mAudioTrack.stop();
-				stopTiming();
-				if(recordTask != null) recordTask.cancel(false);
-				
+				if(recordTask != null) {
+					recordTask.cancel(false);
+					recordTask.reset();
+				}
 				// Reset timer
 				timer.updatedCancel();
 				mPauseTimeLeft = num_records * TIME_BETWEEN_CHIRPS_MS;
@@ -131,9 +121,13 @@ public class MainActivity extends Activity {
 			@Override
 			public void onClick(View v) {
 				mStatusText.setText("Started");
-				mPlayButton.setText("Started");
-	        	rawTOF = -1;
-	        	selfSpeakerDelay = -1;
+				if(mPlayButton.getText().equals("Save records")) {
+					// Save records
+					//createTimesRecordFile();
+					createBigBufferFile(grandBuffer);
+					mPlayButton.setText("Play");
+					return;
+				}
 		        started = true;
 		        recordTask = new RecordAudio();
 		        recordTask.execute();
@@ -141,7 +135,7 @@ public class MainActivity extends Activity {
 		        
 				if(timer.isRunning() == false) {
 					mStatusText.setText("Starting");
-					timer = new PausableCountdownTimer(mPauseTimeLeft, TIME_BETWEEN_CHIRPS_MS, mTimeText, mBeepNumText);
+					timer = new PausableCountdownTimer(mPauseTimeLeft, TIME_BETWEEN_CHIRPS_MS, mTimeText);
 					timer.start();
 					mPlayButton.setText("Pause");
 				} else if (timer.isRunning() == true) {
@@ -176,7 +170,7 @@ public class MainActivity extends Activity {
     void genTone(){
         // fill out the array
         for (int i = 0; i < NUM_SAMPLES; ++i) {
-            sample[i] = Math.sin(2 * Math.PI * i / (sampleRate/freqOfTone));
+            sample[i] = Math.sin(2 * Math.PI * i / (sampleRate/SELF_TONE_FREQUENCY));
         }
 
         // convert to 16 bit pcm sound array
@@ -194,66 +188,39 @@ public class MainActivity extends Activity {
     
     void playSound(){
     	beepNum++;
-    	selfSpeakerDelay = -1;
-    	rawTOF = -1;
     	mAudioTrack.stop();
     	mAudioTrack.reloadStaticData();
-        startTiming();
         mAudioTrack.play();
     }
     
-    void startTiming() {
-    	mSendTime = System.nanoTime();
-    }
-    
-    long stopTiming() {
-    	mReceiveTime = System.nanoTime();
-    	long delta = mReceiveTime - mSendTime;
-    	return delta;
-    	/*if(times_index + 1 < num_records - 1) {
-    		timesRecord[times_index++] = delta;
-    	}*/
-    	//Log.d(TAG, "Time of flight = " + String.valueOf(delta) + "ns == " 
-		//												+ String.valueOf(delta/1000000000.0) + "s");
-		//Log.d(TAG, "Distance approx = " + String.valueOf(delta/1000000000.0 * SPEED_OF_SOUND));
-		
-    }
-    
-    private void createTimesRecordFile() {
+    private void createBigBufferFile(List<Short> buffer) {
     	Calendar c = Calendar.getInstance(); 
         SimpleDateFormat dateFormat = new SimpleDateFormat("dd-MM-yyyy");
         SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm:ss");
         dateFormat.setTimeZone(c.getTimeZone());
         timeFormat.setTimeZone(c.getTimeZone());
-    	String FILE_NAME = timeFormat.format(c.getTime())+".csv";
+    	String FILE_NAME = timeFormat.format(c.getTime())+"Buffer.csv";
     	if (isExternalStorageWritable()) {
     		File root = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS); 
     		File dir = new File (root.getAbsolutePath() + "/Thesis/" + dateFormat.format(c.getTime()));
-    		//dir.mkdirs();
-    		//String root = Environment.getExternalStorageDirectory().toString();
-    		//File folder = new File(this.getFilesDir() + "/" + dateFormat.format(c.getTime()));    
-    		
-    	    //folder.mkdirs();
-    		/*File folder = new File(getExternalFilesDir(
-    	            Environment.DIRECTORY_DOWNLOADS), dateFormat.format(c.getTime()));*/
     	    if (!dir.exists()) {
                 dir.mkdirs();
             }
-    	    Toast.makeText(this, dir.toString(), Toast.LENGTH_SHORT).show();
+    	    //Toast.makeText(this, dir.toString(), Toast.LENGTH_SHORT).show();
     	    File file = new File(dir.getAbsolutePath(), FILE_NAME);
     	    try {
     	    	writer = new FileWriter(file);
 	            
-	            writeCsvHeader("Master selfTimesRecord", "Master totalTimesRecord");
-	            for(int i = 0; i < selfTimesRecord.size(); i++) {
-	            	writeCsvData(selfTimesRecord.get(i), totalTimesRecord.get(i));
+    	    	// Write contents of buffer in
+	            for(int i = 0; i < buffer.size(); i++) {
+	            	String line = buffer.get(i).toString() + "\n";
+	          	  	writer.write(line);
 	            }
 	            
 	            writer.flush();
 	            writer.close(); 
 	            Log.d("FILEIO", "FINISHED WRITING");
-	            Log.d("FILEIO", "Records in " + dir.toString());
-	            Toast.makeText(this, "Records written to file.", Toast.LENGTH_SHORT).show();
+	            Toast.makeText(this, "Buffer written to file.", Toast.LENGTH_SHORT).show();
     	    } catch (IOException e) {
     	        e.printStackTrace();
     	    }    
@@ -273,12 +240,12 @@ public class MainActivity extends Activity {
     }
 
     private void writeCsvHeader(String h1, String h2) throws IOException {
-    	   String line = String.format("%s %s\n", h1,h2);
+    	   String line = String.format("%s,%s\n", h1,h2);
     	   writer.write(line);
     	 }
 
 	private void writeCsvData(long selfTime, long totalTime) throws IOException {  
-	  String line = String.format("%d,%d,\n", selfTime, totalTime);
+	  String line = String.format("%d,%d\n", selfTime, totalTime);
 	  writer.write(line);
 	}
 	
@@ -286,20 +253,18 @@ public class MainActivity extends Activity {
 		private boolean mIsRunning = false;
 		private long mMillisUntilFinished;
 		private TextView mTimeLeftText;
-		private TextView mBeepNumText;
 		
 		public PausableCountdownTimer(long millisInFuture,
-				long countDownInterval, TextView tv, TextView tv2) {
+				long countDownInterval, TextView tv) {
 			super(millisInFuture, countDownInterval);
 			mTimeLeftText = tv;
-			mBeepNumText = tv2;
 			beepNum = 0;
 			
 		}
 
 		@Override
 		public void onTick(long millisUntilFinished) {
-			recordTask.resetListening();
+			recordTask.reset();
 			mTimeLeftText.setText(String.valueOf(millisUntilFinished/1000.0) + " s");
 			mIsRunning = true;
 			mMillisUntilFinished = millisUntilFinished;
@@ -311,7 +276,7 @@ public class MainActivity extends Activity {
 			mIsRunning = false;
 			mMillisUntilFinished = 0;
 			recordTask.cancel(false);
-			mResetButton.setText("Save records");
+			mPlayButton.setText("Save records");
 		}
 		
 		public void updatedCancel() {
@@ -333,6 +298,12 @@ public class MainActivity extends Activity {
     	private final String SELF_DETECTED_STRING = "DETECTED_SELF";
     	private final String OTHER_DETECTED_STRING = "DETECTED_OTHER";
     	
+    	private final long Ts = (long) 1.0/sampleRate;
+    	
+    	private int curBufferCount = 0;
+    	private int selfToneBeginningIndex = -1;
+    	private int otherToneBeginningIndex = -1;
+    	
     	boolean heardSelf = false;
     	boolean heardOther = false;
     	
@@ -344,12 +315,12 @@ public class MainActivity extends Activity {
         	}
         	//playSound();
         	List<Integer> zeroCrossingIndices = new ArrayList<Integer>();
-            int bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfiguration, audioEncoding);
+            int bufferSize = 60000;//AudioRecord.getMinBufferSize(sampleRate, channelConfiguration, audioEncoding);
             Log.d(SELF_DETECTED_STRING, "min buffer size = " + String.valueOf(AudioRecord.getMinBufferSize(sampleRate, channelConfiguration, audioEncoding)));
             audioRecord = new AudioRecord(MediaRecorder.AudioSource.DEFAULT, sampleRate, channelConfiguration, audioEncoding, bufferSize);
             int bufferReadResult;
             short[] buffer = new short[blockSize];
-            double[] toTransform = new double[blockSize];
+            //double[] toTransform = new double[bufferSize];
             try{
             	audioRecord.startRecording();
             }
@@ -359,42 +330,34 @@ public class MainActivity extends Activity {
             }
             while (started) {
             	zeroCrossingIndices.clear();
-            //for(int j = 0; j < 20; j++) {
             	bufferReadResult = audioRecord.read(buffer, 0, blockSize);
+            	curBufferCount++;
             
             	if(isCancelled())
                     	break;
-
-            	double buffer_i;
-            	double buffer_i_prev;
+            	
 	            for (int i = 1; i < blockSize && i < bufferReadResult; i++) {
-	            	buffer_i = (double) buffer[i] / 32768.0;
-	            	buffer_i_prev = (double) buffer[i - 1] / 32768.0;
-	            	
-	            	if(buffer_i < 0.0 && buffer_i_prev > 0.0 || buffer_i > 0.0 && buffer_i_prev < 0.0) {
+	            	grandBuffer.add(buffer[i-1]);
+	            	Log.d(TAG, String.valueOf(buffer[i]));
+	            	if(buffer[i] < 0 && buffer[i-1] > 0 || buffer[i] > 0 && buffer[i-1] < 0) {	            	}
 	            		zeroCrossingIndices.add(i);
-	            		// zero crossing detected
-	            		Log.d(TAG, "zero crossing at index i = " + String.valueOf(i));
-	            	}
-	            	
-	                toTransform[i] = (double) buffer[i] / 32768.0; // signed 16 bit
 	            }
 	            
-	            if(!heardSelf && detectTone(sampleRate, freqOfTone, zeroCrossingIndices)) {
-	            	Log.e(SELF_DETECTED_STRING, "Detected self tone " + String.valueOf(freqOfTone));
-	            	selfSpeakerDelay = stopTiming();
+	            // TODO: merge into above for loop
+	            int isOtherTone = detectTone(sampleRate, OTHER_TONE_FREQUENCY, zeroCrossingIndices);
+	            int isSelfTone = detectTone(sampleRate, SELF_TONE_FREQUENCY, zeroCrossingIndices);
+	            
+	            if(!heardSelf && isSelfTone > 0) {
 	            	heardSelf = true;
+	            	heardOther = false;
+	            	selfToneBeginningIndex = (curBufferCount - 1) * blockSize + isSelfTone;
 	            	publishProgress(false);
-	            	selfTimesRecord.add(selfSpeakerDelay);
             	}
-	            else if(!heardOther && detectTone(sampleRate, freqOfTone * 2, zeroCrossingIndices)) {
-            		Log.e(OTHER_DETECTED_STRING, "Detected receive tone = " + String.valueOf(freqOfTone * 2));
-            		rawTOF = stopTiming();
-	        		Log.d(TAG, "rawTOF = " + String.valueOf(rawTOF/1000000.0) + "ms");
+	            else if(!heardOther && isOtherTone > 0) {
 	        		heardOther = true;
+	        		heardSelf = false;
+	        		otherToneBeginningIndex = (curBufferCount - 1) * blockSize + isOtherTone;
 	        		publishProgress(true);
-	        		totalTimesRecord.add(rawTOF);
-	        		
             	}
 	            if(isCancelled())
 	            	break;
@@ -412,14 +375,12 @@ public class MainActivity extends Activity {
         }
         
         @Override
-        protected void onProgressUpdate(Boolean... receiveComplete) {
+        protected void onProgressUpdate(Boolean... isLaterBeep) {
         	mBeepNumText.setText("Beep num: " + String.valueOf(beepNum));
-        	if(!receiveComplete[0]) {
-    			mSelfDelayText.setText("selfSpeakerDelay = " + String.valueOf(selfSpeakerDelay/1000000.0) + "ms");
-    			mTotalDelayText.setText("waiting...");
-        	} else {
-        		mTotalDelayText.setText("rawTOF - selfSpeakerDelay = " + String.valueOf((rawTOF - selfSpeakerDelay)/1000000.0) + "ms");
-        	}
+        	mSelfToneIndexText.setText("Self tone index: " + String.valueOf(selfToneBeginningIndex));
+			mOtherToneIndexText.setText("Other tone index: " + String.valueOf(otherToneBeginningIndex));
+			if(isLaterBeep[0]) 
+				mIndexDiffText.setText("Index Diff: " + String.valueOf(otherToneBeginningIndex - selfToneBeginningIndex));
         }
         
         protected void onPostExecute(Void result) {
@@ -442,18 +403,25 @@ public class MainActivity extends Activity {
          * ONLY DETECT TONES THAT ARE MULTIPLES OF EACH OTHER
          * PRONE TO SAY FALSE THAN TRUE
          */
-        private boolean detectTone(int sampleRate, int pitch, List<Integer> indices) {
-        	
-        	if(indices.size() <= 0) {
-        		return false;
-        	}
-        	int CONSEC_PATTERN_THRESHOLD = (indices.size() < 20) ? indices.size() : 20;
+        /**
+         * Detect the presence of a tone and returns the index of beginning of tone.
+         * @param sampleRate
+         * @param pitch
+         * @param indices
+         * @return index of beginning of tone in the 512 buffer
+         */
+        private int detectTone(int sampleRate, int pitch, List<Integer> indices) {
         	double Ts = 1.0 / sampleRate;
         	double T = 1.0 / pitch;
-        	
         	int numTsInT = (int) (T/Ts);
-        	
         	int expectedSpacing = numTsInT / 2; // index spacing, 2 zero crossings in a single sinusoid
+        	
+        	int CONSEC_PATTERN_THRESHOLD = blockSize/expectedSpacing - 2;
+        	
+        	if(indices.size() < CONSEC_PATTERN_THRESHOLD) {
+        		return -1;
+        	}
+        	
         	Log.d(TAG, "Expected spacing for " + String.valueOf(pitch) + " = " + String.valueOf(expectedSpacing));
         	int diff = 0;
         	int consecCount = 0;
@@ -465,17 +433,20 @@ public class MainActivity extends Activity {
         			Log.d("Spacing", "Spacing ok, index " + String.valueOf(i) + " = " + String.valueOf(indices.get(i)));
         		} else {
         			Log.e("Spacing", "Failed, index " + String.valueOf(i) + " = " + String.valueOf(indices.get(i)));
-        			return false;
+        			return -1;
         		}
         		
         		if(consecCount >= CONSEC_PATTERN_THRESHOLD) {
         			Log.d("Spacing", "Woohoo conseq count = " + String.valueOf(consecCount));
-        			return true;
+        			return indices.get(i-consecCount);
         		}
         	}
-        	return false;
+        	return -1;
         }
-        public void resetListening() {
+        public void reset() {
+        	curBufferCount = 0;
+        	selfToneBeginningIndex = -1;
+        	otherToneBeginningIndex = -1;
         	heardSelf = false;
         	heardOther = false;
         }

@@ -31,12 +31,12 @@ public class MainActivity extends Activity {
 	public static final String TAG = "PlayToneMaster";
 	//private final int SPEED_OF_SOUND = 344;
 	
-    private final int sampleRate = 8000;
+    private final int sampleRate = 32000;
     int channelConfiguration = AudioFormat.CHANNEL_IN_MONO;
     int audioEncoding = AudioFormat.ENCODING_PCM_16BIT;
     AudioRecord audioRecord;
     RecordAudio recordTask;
-    int blockSize = 32;
+    int blockSize = 256;
     boolean started = false;
     
     // Self tone
@@ -47,12 +47,13 @@ public class MainActivity extends Activity {
     private AudioTrack mAudioTrack;
     private final byte generatedSnd[] = new byte[2 * NUM_SAMPLES];
     
-    private final int num_records = 3;
+    private final int num_records = 50;
     private List<Short> grandBuffer;
     private int beepNum = 0;
+    List<Integer> diffList = new ArrayList<Integer>();
     
     private PausableCountdownTimer timer;
-    private final int TIME_BETWEEN_CHIRPS_MS = 2000;
+    private final int TIME_BETWEEN_CHIRPS_MS = 1400;
     private long mPauseTimeLeft = num_records * TIME_BETWEEN_CHIRPS_MS;
     
     // Views
@@ -124,7 +125,7 @@ public class MainActivity extends Activity {
 				if(mPlayButton.getText().equals("Save records")) {
 					// Save records
 					//createTimesRecordFile();
-					createBigBufferFile(grandBuffer);
+					createBigBufferFile(diffList);
 					mPlayButton.setText("Play");
 					return;
 				}
@@ -193,13 +194,13 @@ public class MainActivity extends Activity {
         mAudioTrack.play();
     }
     
-    private void createBigBufferFile(List<Short> buffer) {
+    private void createBigBufferFile(List<Integer> buffer) {
     	Calendar c = Calendar.getInstance(); 
         SimpleDateFormat dateFormat = new SimpleDateFormat("dd-MM-yyyy");
         SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm:ss");
         dateFormat.setTimeZone(c.getTimeZone());
         timeFormat.setTimeZone(c.getTimeZone());
-    	String FILE_NAME = timeFormat.format(c.getTime())+"Buffer.csv";
+    	String FILE_NAME = timeFormat.format(c.getTime())+"_DiffList.csv";
     	if (isExternalStorageWritable()) {
     		File root = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS); 
     		File dir = new File (root.getAbsolutePath() + "/Thesis/" + dateFormat.format(c.getTime()));
@@ -264,7 +265,6 @@ public class MainActivity extends Activity {
 
 		@Override
 		public void onTick(long millisUntilFinished) {
-			recordTask.reset();
 			mTimeLeftText.setText(String.valueOf(millisUntilFinished/1000.0) + " s");
 			mIsRunning = true;
 			mMillisUntilFinished = millisUntilFinished;
@@ -307,6 +307,9 @@ public class MainActivity extends Activity {
     	boolean heardSelf = false;
     	boolean heardOther = false;
     	
+    	
+    	
+    	
         @Override
         protected Void doInBackground(Void... params) {
       
@@ -338,9 +341,11 @@ public class MainActivity extends Activity {
             	
 	            for (int i = 1; i < blockSize && i < bufferReadResult; i++) {
 	            	grandBuffer.add(buffer[i-1]);
-	            	Log.d(TAG, String.valueOf(buffer[i]));
-	            	if(buffer[i] < 0 && buffer[i-1] > 0 || buffer[i] > 0 && buffer[i-1] < 0) {	            	}
+	            	
+	            	if((buffer[i] < 0 && buffer[i-1] > 0) || (buffer[i] > 0 && buffer[i-1] < 0)) {
 	            		zeroCrossingIndices.add(i);
+	            		//Log.d(TAG, "Zero crossing " + String.valueOf(i));
+	            	}
 	            }
 	            
 	            // TODO: merge into above for loop
@@ -357,8 +362,10 @@ public class MainActivity extends Activity {
 	        		heardOther = true;
 	        		heardSelf = false;
 	        		otherToneBeginningIndex = (curBufferCount - 1) * blockSize + isOtherTone;
+	        		diffList.add(otherToneBeginningIndex - selfToneBeginningIndex);
 	        		publishProgress(true);
             	}
+	            Log.d(TAG, "Cur buffer count " + String.valueOf(curBufferCount));
 	            if(isCancelled())
 	            	break;
             }
@@ -417,6 +424,7 @@ public class MainActivity extends Activity {
         	int expectedSpacing = numTsInT / 2; // index spacing, 2 zero crossings in a single sinusoid
         	
         	int CONSEC_PATTERN_THRESHOLD = blockSize/expectedSpacing - 2;
+        	Log.d("Spacing", "Consec pattern threshold = " + String.valueOf(CONSEC_PATTERN_THRESHOLD));
         	
         	if(indices.size() < CONSEC_PATTERN_THRESHOLD) {
         		return -1;
@@ -447,6 +455,7 @@ public class MainActivity extends Activity {
         	curBufferCount = 0;
         	selfToneBeginningIndex = -1;
         	otherToneBeginningIndex = -1;
+        	diffList.clear();
         	heardSelf = false;
         	heardOther = false;
         }

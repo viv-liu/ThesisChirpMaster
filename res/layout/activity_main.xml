@@ -39,16 +39,6 @@
         android:text="Pitch detected or not" />
 
     <TextView
-        android:id="@+id/textView3"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_centerHorizontal = "true"
-        android:layout_alignParentBottom="true"
-        android:layout_marginBottom="56dp"
-        android:text="Time left"
-        android:textAppearance="?android:attr/textAppearanceLarge" />
-
-    <TextView
         android:id="@+id/textView4"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -72,5 +62,15 @@
         android:layout_below="@+id/textView5"
         android:text="Index difference"
         android:textAppearance="?android:attr/textAppearanceMedium" />
+
+    <TextView
+        android:id="@+id/textView3"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_above="@+id/button1"
+        android:layout_centerHorizontal="true"
+        android:layout_marginBottom="25dp"
+        android:text="Distance result"
+        android:textAppearance="?android:attr/textAppearanceLarge" />
 
 </RelativeLayout>
